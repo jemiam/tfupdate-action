@@ -39,6 +39,13 @@ inputs:
   reviewer:
     description: "Reviewer to be assigned when creating a PR"
     required: false
+  multiple_workspaces:
+    description: "Whether to have multiple workspaces"
+    required: false
+    default: "false"
+  ci_file:
+    description: "A path to ci file that should be updated for Terraform version"
+    required: false
 
 runs:
   using: "docker"

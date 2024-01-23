@@ -86,11 +86,19 @@ function run_tfupdate {
   git config --local user.email "${USER_EMAIL}"
   git config --local user.name "${USER_NAME}"
 
+  PULL_REQUEST_OPENED=false
+  CHECKOUT_BRANCH="update-${INPUT_RESOURCE}-to-v${VERSION}"
   # Checkout a branch if a PR does not exist.
   ESCAPED_MESSAGE=$(echo $UPDATE_MESSAGE | sed "s/\./\\\./g; s/\]/\\\]/g; s/\[/\\\[/g")
   if hub pr list -s "open" -f "%t: %U%n" | grep -x "${ESCAPED_MESSAGE}:.*"; then
     echo "A pull request already exists"
-    exit 0
+    if ! "${INPUT_MULTIPLE_WORKSPACES}"; then
+      exit 0
+    fi
+    PULL_REQUEST_OPENED=true
+    echo "Checking out to ${CHECKOUT_BRANCH} branch"
+    git fetch --all
+    git checkout ${CHECKOUT_BRANCH}
   elif hub pr list -s "merged" -f "%t: %U%n" | grep -x "${ESCAPED_MESSAGE}:.*"; then
     echo "A pull request is already merged"
     exit 0
@@ -98,7 +106,6 @@ function run_tfupdate {
     echo "A pull request is already closed"
     exit 0
   else
-    CHECKOUT_BRANCH="update-${INPUT_RESOURCE}-to-v${VERSION}"
     echo "Checking out to ${CHECKOUT_BRANCH} branch"
     git fetch --all
     git checkout -b ${CHECKOUT_BRANCH} origin/${INPUT_BASE_BRANCH}
@@ -109,13 +116,21 @@ function run_tfupdate {
   echo "Running tfupdate ${COMMAND}"
   tfupdate ${COMMAND}
 
+  if [ "${INPUT_RESOURCE}" = "terraform" ] && [ -e "${INPUT_CI_FILE}" ]; then
+    # CIで使われるterraformのバージョンも更新する
+    # GNU sedがインストールされているのが前提
+    sed -i "s/terraform_version: [0-9]\+\.[0-9]\+\.[0-9]\+$/terraform_version: ${VERSION}/" "${INPUT_CI_FILE}"
+  fi
+
   # Send a pull reuqest agaist the base branch
   if git add . && git diff --cached --exit-code --quiet; then
     echo "No changes"
   else
     echo "Creating a pull request: ${UPDATE_MESSAGE}"
     git commit -m "${UPDATE_MESSAGE}"
-    if [ ${INPUT_REVIEWER} ]; then
+    if "$PULL_REQUEST_OPENED"; then
+      git push origin ${CHECKOUT_BRANCH}
+    elif [ ${INPUT_REVIEWER} ]; then
       hub pull-request -m "${UPDATE_MESSAGE}" -m "${PULL_REQUEST_BODY}" -b "${INPUT_BASE_BRANCH}" -l "${INPUT_LABEL}" -r "${INPUT_REVIEWER}" -p
     else
       hub pull-request -m "${UPDATE_MESSAGE}" -m "${PULL_REQUEST_BODY}" -b "${INPUT_BASE_BRANCH}" -l "${INPUT_LABEL}" -p
